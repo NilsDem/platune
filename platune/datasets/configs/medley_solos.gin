@@ -1,0 +1,25 @@
+from __gin__ import dynamic_registration
+
+from platune.datasets import process_attributes
+from platune.datasets import audio_descriptors
+
+
+# HPARAMS
+
+SAMPLE_RATE = 44100
+AE_RATIO = 4096
+
+INSTRUMENT_VALUES = ['female singer', 'violin', 'flute', 'clarinet', 'tenor saxophone', 'trumpet']
+
+
+# process 
+process_attributes.process_midi_attributes:
+    ae_ratio = %AE_RATIO
+    pitch_note_values = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    octave_boundaries = [0, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120]
+    instruments_values = %INSTRUMENT_VALUES
+    dynamics_boundaries = [1, 21, 41, 56, 71, 86, 101, 116, 128]
+
+
+audio_descriptors.compute_all:
+    sr = %SAMPLE_RATE
