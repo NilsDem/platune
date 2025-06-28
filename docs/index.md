@@ -2,7 +2,7 @@
 
 <h1>PLaTune: Pretrained Latents Tuner - Adding temporal musical controls on top of pretrained generative models</h1>
 Supporting webpage for ISMIR 2025.
-Code is available <a href="https://github.com/anonymous4research1/tcplugen">here</a>.
+Code is available <a href="https://github.com/acids-ircam/platune">here</a>.
 </div>
 
 
