@@ -59,7 +59,7 @@ def maestro_parser(main_folder, filters=None):
         midi_file = a[:-4] + ".midi"
         # audio_file = os.path.join(main_folder, "audio", a)
         metadatas.append({"path": str(a), "midi_file": midi_file})
-    
+
     # audios = [os.path.join(main_folder, "audio", f) for f in audios]
 
     print("sanity check: ", audios[0], metadatas[0])
@@ -128,19 +128,33 @@ def slakh_parser(audio_folder, ban_list=[]):
 def get_urmp_midi_file_path(midi_folder, audio_path):
     _, n, inst, audio_idx, audio_name = audio_path.stem.split('_')
 
-    midi_files_candidates = list(pathlib.Path(midi_folder).rglob(f'{audio_idx}_{audio_name}_{inst}*.mid'))
+    midi_files_candidates = list(
+        pathlib.Path(midi_folder).rglob(
+            f'{audio_idx}_{audio_name}_{inst}*.mid'))
 
     if len(midi_files_candidates) > 1:
-        
-        if (inst == 'vn' and n == '1') or (inst == 'fl' and n == '1') or (inst == 'tpt' and n == '1') or (inst == 'sax' and n == '1') or (inst == 'va' and n == '3'):
-            midi_filepath = [str(p) for p in midi_files_candidates if f"{inst}.mid" in str(p)][0]
-        
-        elif (inst == 'vn' and n == '2') or (inst == 'fl' and n == '2') or (inst == 'tpt' and n == '2') or (inst == 'sax' and n == '2') or (inst == 'va' and n == '4'):
-            midi_filepath = [str(p) for p in midi_files_candidates if f"{inst}_" in str(p)][0]
-        
+
+        if (inst == 'vn' and n == '1') or (inst == 'fl' and n == '1') or (
+                inst == 'tpt'
+                and n == '1') or (inst == 'sax'
+                                  and n == '1') or (inst == 'va' and n == '3'):
+            midi_filepath = [
+                str(p) for p in midi_files_candidates
+                if f"{inst}.mid" in str(p)
+            ][0]
+
+        elif (inst == 'vn' and n == '2') or (inst == 'fl' and n == '2') or (
+                inst == 'tpt'
+                and n == '2') or (inst == 'sax'
+                                  and n == '2') or (inst == 'va' and n == '4'):
+            midi_filepath = [
+                str(p) for p in midi_files_candidates if f"{inst}_" in str(p)
+            ][0]
+
         else:
-            raise ValueError(f'Could not find midi file for file : {str(audio_path)}')
-    
+            raise ValueError(
+                f'Could not find midi file for file : {str(audio_path)}')
+
     else:
         midi_filepath = str(midi_files_candidates[0])
     return midi_filepath
@@ -218,6 +232,13 @@ def medley_solos_mono_parser(audio_folder):
 
         if inst_name not in filter_ployphonic_instruments:
             audios_filtered.append(audio)
+
+            if inst_name == "female singer":
+                inst_name = "voice"
+            elif inst_name == "tenor saxophone":
+                inst_name = "saxophone"
+            elif inst_name == "violin":
+                inst_name = "strings"
 
             data = {
                 "path": audio,

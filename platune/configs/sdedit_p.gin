@@ -1,0 +1,80 @@
+from __gin__ import dynamic_registration
+
+from platune.datasets import dataset
+from platune.networks import transformerv2
+from platune import model
+
+
+# HPARAMS
+
+BATCH = 32
+N_WORKERS = 0
+
+LATENT_DIM = 24
+
+SEQ_LENGTH = 64
+
+DISCRETE_KEYS = ["pitch", "octave"]#, "instrument"]
+USE_INSTRUMENT=False
+CLASSES_ATTR_DISCRETE = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [0, 1, 2, 3, 4, 5, 6, 7, 8]]#, [0, 1, 2, 3, 4, 5]]
+AE_RATIO = 2048
+
+CONTINUOUS_KEYS = []
+MIN_MAX_FILE = "/data/nils/repos/codecs_benchmark/datastats/filtered_feature_stats_medley_slakh_32.json"
+
+SIGMA_INIT = 0.4
+SIGMA_DECAY = 0.995
+R = 0.25
+
+SIGMA_TARGET_CONTINUOUS = 0.1
+
+LEARNING_RATE = 1e-4
+USE_GRAD_CLIP = True
+
+NB_STEPS = 20
+
+
+# DATA_LOADER  
+dataset.load_data:
+    discrete_keys = %DISCRETE_KEYS 
+    continuous_keys = %CONTINUOUS_KEYS
+    batch_size = %BATCH
+    n_workers = %N_WORKERS
+    ae_ratio = %AE_RATIO
+    crop = %SEQ_LENGTH
+
+dataset.extract_pitch_class_and_octave_signal:
+    hold_last_note = True
+    dummy_value = "0"
+
+# NETWORKS
+transformerv2.Denoiser:
+    n_channels = %LATENT_DIM
+    seq_len = %SEQ_LENGTH
+    embed_dim = 512
+    noise_embed_dims = 128
+    time_cond_dim = 2
+    n_layers = 6
+    mlp_multiplier = 3
+    dropout = 0.1
+    causal = False
+    pos_emb_type = "rotary"
+    max_cache_size = 0
+    min_chunk_size = 1
+
+
+# MODEL
+model.SDEdit:
+    flow = @transformerv2.Denoiser
+    latent_dim = %LATENT_DIM
+    discrete_keys = %DISCRETE_KEYS
+    continuous_keys = %CONTINUOUS_KEYS
+    classes_attr_discrete = %CLASSES_ATTR_DISCRETE
+    sigma_init = %SIGMA_INIT
+    r = %R
+    sigma_decay = %SIGMA_DECAY
+    sigma_target_continuous = %SIGMA_TARGET_CONTINUOUS
+    lr = %LEARNING_RATE
+    use_grad_clip = %USE_GRAD_CLIP
+    n_ex_val = 2
+    nb_steps = %NB_STEPS

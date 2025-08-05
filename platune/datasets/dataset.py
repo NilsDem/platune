@@ -10,7 +10,6 @@ from typing import List
 from .audio_example import AudioExample
 from .base import SimpleDataset
 
-
 CONTINUOUS_ATTRIBUTES = [
     'rms', 'loudness1s', 'integrated_loudness', 'centroid', 'bandwidth',
     'booming', 'sharpness', 'arousal', 'valence', "dark", "epic", "retro",
@@ -195,46 +194,347 @@ class LatentsContinuousDiscreteAttritbutesDataset(SimpleDataset):
         return z, attr_discrete, attr_continuous
 
 
+def extract_pitch_class_and_octave_signal_old(pm,
+                                              num_frames,
+                                              sample_rate=44100,
+                                              hop_length=512):
+    """
+    Args:
+        pm (pretty_midi.PrettyMIDI): Loaded MIDI file
+        num_frames (int): Number of time frames (usually audio_len // hop_length)
+        sample_rate (int): Sampling rate of the corresponding audio
+        hop_length (int): Hop size in samples (for frame spacing)
+    
+    Returns:
+        pitch_class_signal: (num_frames,) array with pitch class [0–11] or -1 if no note
+        octave_signal: (num_frames,) array with octave (0–10) or -1 if no note
+    """
+    pitch_class_signal = np.full(num_frames, fill_value=12, dtype=int)
+    octave_signal = np.full(num_frames, fill_value=8, dtype=int)
+
+    # times = np.arange(num_frames) * hop_length / sample_rate
+    times = np.linspace(
+        0 + hop_length / sample_rate / 2,
+        num_frames * hop_length / sample_rate - hop_length / sample_rate / 2,
+        num_frames)
+    # print(num_frames * hop_length / sample_rate)
+
+    for i, t in enumerate(times):
+        active_notes = []
+
+        for inst in pm.instruments:
+            if inst.is_drum:
+                continue
+            for note in inst.notes:
+                if note.start <= t < note.end:
+                    active_notes.append((note.pitch, note.velocity))
+
+        if active_notes:
+            # Pick most prominent (loudest) note
+            pitch, _ = max(active_notes, key=lambda x: x[1])
+            pitch_class = pitch % 12
+            octave = min(pitch // 12, 8)
+
+            pitch_class_signal[i] = pitch_class
+            octave_signal[i] = octave
+
+    return pitch_class_signal, octave_signal
+
+
+import numpy as np
+
+
 @gin.configurable
-def load_data(data_path: str,
+def extract_pitch_class_and_octave_signal(pm,
+                                          num_frames,
+                                          velocity_groups=6,
+                                          sample_rate=44100,
+                                          hop_length=512,
+                                          hold_last_note=False,
+                                          dummy_value="max"):
+    """
+    Args:
+        pm (pretty_midi.PrettyMIDI): Loaded MIDI file
+        num_frames (int): Number of time frames (usually audio_len // hop_length)
+        sample_rate (int): Sampling rate of the corresponding audio
+        hop_length (int): Hop size in samples (for frame spacing)
+        hold_last_note (bool): If True, holds last pitch/octave when no note is active
+
+    Returns:
+        pitch_class_signal: (num_frames,) array with pitch class [0–11] or 12 (or held value)
+        octave_signal: (num_frames,) array with octave (0–10) or 8 (or held value)
+    """
+    if dummy_value == "0":
+        pitch_class_signal = np.full(num_frames, fill_value=0, dtype=int)
+        octave_signal = np.full(num_frames, fill_value=0, dtype=int)
+        velocity_group_signal = np.full(num_frames, fill_value=0, dtype=int)
+        # print("USING 0 VALUE ")
+    elif dummy_value == "max":
+        pitch_class_signal = np.full(num_frames, fill_value=12, dtype=int)
+        octave_signal = np.full(num_frames, fill_value=8, dtype=int)
+        velocity_group_signal = np.full(num_frames,
+                                        fill_value=velocity_groups + 1,
+                                        dtype=int)
+        # print("USING MAX VALUE ")
+
+    last_pitch_class = 0
+    last_octave = 0
+    last_velocity = 0
+    velocity_bins = np.linspace(40, 128, velocity_groups + 1)
+
+    times = np.linspace(
+        0 + hop_length / sample_rate / 2,
+        num_frames * hop_length / sample_rate - hop_length / sample_rate / 2,
+        num_frames)
+
+    for i, t in enumerate(times):
+        active_notes = []
+
+        for inst in pm.instruments:
+            if inst.is_drum:
+                continue
+            for note in inst.notes:
+                if note.start <= t < note.end:
+                    active_notes.append((note.pitch, note.velocity))
+
+        if active_notes:
+            pitch, velocity = max(active_notes, key=lambda x: x[1])
+            pitch_class = pitch % 12
+            octave = min(pitch // 12, 7)
+            velocity_group = np.digitize(velocity, velocity_bins) - 1
+
+            pitch_class_signal[i] = pitch_class
+            octave_signal[i] = octave
+            velocity_group_signal[i] = velocity_group
+
+            last_pitch_class = pitch_class
+            last_octave = octave
+            last_velocity = velocity_group
+        elif hold_last_note:
+            pitch_class_signal[i] = last_pitch_class
+            octave_signal[i] = last_octave
+            velocity_group_signal[i] = last_velocity
+
+    return pitch_class_signal, octave_signal, velocity_group_signal
+
+
+import json
+
+
+@gin.configurable
+def make_collate_fn(
+    descriptor_names,
+    num_signal,
+    ae_ratio,
+    velocity_groups=0,
+    use_instrument=False,
+):
+
+    hop_length = ae_ratio  # assumed from earlier
+
+    def collate_fn(batch):
+        zs = []
+        attr_continous = []
+        attr_discrete = []
+
+        for item in batch:
+            x = item["z"]
+            total_time = x.shape[-1]
+
+            # Crop waveform
+            if x.shape[-1] > num_signal:
+                i0 = np.random.randint(0, x.shape[-1] - num_signal)
+            else:
+                i0 = 0  # no crop if too short
+
+            x = x[..., i0:i0 + num_signal]
+            zs.append(x)
+
+            # Feature hop parameters
+
+            feature_start = i0
+            feature_len = num_signal
+
+            cropped_continuous = []
+            cropped_discrete = []
+            if "pitch" in descriptor_names:
+                pitch_class_signal, octave_signal, velocity_signal = extract_pitch_class_and_octave_signal(
+                    item["midi"],
+                    total_time,
+                    velocity_groups=velocity_groups,
+                    sample_rate=44100,
+                    hop_length=hop_length)
+
+                cropped_pitch = pitch_class_signal[
+                    feature_start:feature_start + feature_len]
+                cropped_octave = octave_signal[feature_start:feature_start +
+                                               feature_len]
+                cropped_velocity = velocity_signal[
+                    feature_start:feature_start + feature_len]
+
+            for name in descriptor_names:
+
+                if name == "pitch":
+                    cropped = cropped_pitch
+                    # norm = (cropped_pitch) / 12
+                elif name == "octave":
+                    cropped = cropped_octave
+                    # norm = (cropped_octave) / 8
+                elif name == "velocity":
+                    cropped = cropped_velocity
+                else:
+                    values = np.array(item[name]).flatten()
+                    cropped = values[feature_start:feature_start + feature_len]
+                    # # Normalize
+                    # stats = descriptor_stats[name]
+                    # min_val, max_val = stats["min"], stats["max"]
+                    # norm = (cropped - min_val) / (max_val - min_val)
+                    # norm = np.clip(norm, 0.0, 1.0)
+
+                    # # Bin
+                    # bins = np.array(stats["quantile_bins"])
+                    # bucket = np.stack([
+                    #     int(np.digitize(c, bins, right=False)) - 1
+                    #     for c in cropped
+                    # ])
+                    # bucket = np.clip(bucket, 0, len(bins) - 2)
+                if name in CONTINUOUS_ATTRIBUTES:
+                    cropped_continuous.append(cropped)
+                elif name in DISCRETE_ATTRIBUTES:
+                    cropped_discrete.append(cropped)
+                # binned.append(bucket)
+
+            attr_continous.append(cropped_continuous)
+            attr_discrete.append(cropped_discrete)
+            # binned_features.append(binned)
+
+        # Stack and convert
+        # waveforms = np.stack(waveforms)
+        # for transform in transforms:
+        #     waveforms = transform(waveforms)
+        # waveforms = torch.from_numpy(waveforms).reshape(
+        #     waveforms.shape[0], 1, -1).float()
+
+        attr_continous = np.stack(attr_continous)
+        attr_discrete = np.stack(attr_discrete)
+        # binned_features = np.stack(binned_features)
+
+        attr_continous = torch.tensor(attr_continous, dtype=torch.float32)
+        attr_discrete = torch.tensor(attr_discrete, dtype=torch.long)
+
+        zs = np.stack(zs)
+        zs = torch.tensor(zs).float()
+        if use_instrument:
+            instrument = [
+                b["metadata"]["instrument"].replace("_synthetic", "")
+                for b in batch
+            ]
+        return zs, attr_discrete, attr_continous, instrument
+
+    return collate_fn
+
+
+from after.dataset import SimpleDataset, CombinedDataset
+
+
+@gin.configurable
+def load_data(data_path: List[str],
+              freqs: List[float] = None,
               discrete_keys: List[str] = [],
               continuous_keys: List[str] = [],
               batch_size: int = 8,
               n_workers: int = 0,
               cache: bool = False,
+              velocity_groups: int = 6,
               lmdb_keys_file: str = None,
               dataset_name: str = None,
-              crop: int = None):
+              crop: int = None,
+              ae_ratio: int = None,
+              descriptor_file: str = None,
+              use_instrument: bool = True):
+    data_keys = ["z", "midi", "metadata"] + [
+        k for k in discrete_keys if k not in ["pitch", "octave", "velocity"]
+    ] + continuous_keys
 
-    dataset = LatentsContinuousDiscreteAttritbutesDataset(
-        path=data_path,
-        keys=["z"] + discrete_keys + continuous_keys,
-        lmdb_keys_file=lmdb_keys_file,
-        dataset_name=dataset_name,
-        crop=crop)
+    if len(data_path) > 1:
+        path_dict = {f: {"name": f, "path": f} for f in data_path}
+
+        dataset = CombinedDataset(
+            path_dict=path_dict,
+            keys=data_keys,
+            freqs="estimate" if freqs is None else freqs,
+            config="train",
+            init_cache=cache,
+        )
+
+        train_sampler = dataset.get_sampler()
+
+        valset = CombinedDataset(
+            path_dict=path_dict,
+            config="validation",
+            freqs="estimate" if freqs is None else freqs,
+            keys=data_keys,
+            init_cache=cache,
+        )
+        val_sampler = valset.get_sampler()
+
+    else:
+        dataset = SimpleDataset(path=data_path[0],
+                                keys=data_keys,
+                                init_cache=cache,
+                                split="train")
+
+        valset = SimpleDataset(path=data_path[0],
+                               keys=data_keys,
+                               split="validation",
+                               init_cache=cache)
+        train_sampler, val_sampler = None, None
+
+    # dataset = SimpleDataset(
+    #     path=data_path,
+    #     keys=["z"] + discrete_keys + continuous_keys,
+    #     lmdb_keys_file=lmdb_keys_file,
+    #     dataset_name=dataset_name,
+    #     crop=crop)
     # z, ad, ac = dataset[0]
-    if cache:
-        dataset.build_cache()
-    dataset_size = len(dataset)
-    indices = list(range(dataset_size))
+    # if cache:
+    #     dataset.build_cache()
+    # dataset_size = len(dataset)
+    # indices = list(range(dataset_size))
 
-    train_ids, valid_ids = train_test_split(indices,
-                                            test_size=int(0.05 * dataset_size),
-                                            random_state=42)
+    # train_ids, valid_ids = train_test_split(indices,
+    #                                         test_size=int(0.05 * dataset_size),
+    #                                         random_state=42)
 
-    train_dataset = torch.utils.data.Subset(dataset, train_ids)
-    val_dataset = torch.utils.data.Subset(dataset, valid_ids)
+    # train_dataset = torch.utils.data.Subset(dataset, train_ids)
+    # val_dataset = torch.utils.data.Subset(dataset, valid_ids)
 
-    print("dataset sizes : ", len(train_dataset), len(val_dataset))
-    train_loader = DataLoader(train_dataset,
+    # print("dataset sizes : ", len(train_dataset), len(val_dataset))
+    collate_fn = make_collate_fn(descriptor_names=continuous_keys +
+                                 discrete_keys,
+                                 num_signal=crop,
+                                 ae_ratio=ae_ratio,
+                                 use_instrument=use_instrument,
+                                 velocity_groups=velocity_groups)
+    train_loader = DataLoader(dataset,
                               batch_size,
-                              shuffle=True,
-                              num_workers=n_workers)
-    val_loader = DataLoader(val_dataset,
+                              shuffle=True if train_sampler is None else False,
+                              num_workers=n_workers,
+                              sampler=train_sampler,
+                              collate_fn=collate_fn)
+    val_loader = DataLoader(valset,
                             batch_size,
                             shuffle=False,
-                            num_workers=n_workers)
+                            num_workers=n_workers,
+                            sampler=val_sampler,
+                            collate_fn=collate_fn)
 
     print("dataloader sizes : ", len(train_loader), len(val_loader))
+
+    print(100 * "#")
+
+    print(f"using {n_workers} workers")
+
+    print(100 * "#")
 
     return train_loader, val_loader
