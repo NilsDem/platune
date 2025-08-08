@@ -42,10 +42,10 @@ def search_for_run(run_path, mode="last"):
               help='Name of the gin configuration file to use')
 @click.option('-s',
               '--save_path',
-              default="",
+              default="runs",
               help='path to save models checkpoints')
 @click.option('--max_steps',
-              default=1_500_000,
+              default=200000,
               help='Maximum number of training steps')
 @click.option('--val_every',
               default=10_000,
@@ -186,6 +186,11 @@ def main(db_path, name, config, save_path, max_steps, val_every, gpu, ckpt,
         enable_progress_bar=True,
         **val_check,
     )
+
+    numel = 0
+    for p in model.flow.parameters():
+        numel += p.numel()
+    print(f"Number of parameters in the model: {numel/1e6}")
 
     run = search_for_run(ckpt)
     if run is not None:

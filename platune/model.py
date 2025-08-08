@@ -164,7 +164,7 @@ class PLaTune(pl.LightningModule):
         new_a = torch.cat(new_a, dim=1)
         return new_a
 
-    def process_attributes(self, ad, ac, label):
+    def process_attributes(self, ad, ac, label=None):
         attr = []
         if ad.shape[-1] > 0:
             ad = ad.to(self.device)
@@ -184,7 +184,7 @@ class PLaTune(pl.LightningModule):
             else:
                 attr.append(ac)
 
-        if len(self.label_dict) > 0:
+        if len(self.label_dict) > 0 and label is not None:
             values = [self.label_dict[l] for l in label]
             values = torch.tensor(values).unsqueeze(1).to(self.device)
             values = values.reshape(-1, 1, 1).repeat(1, 1, attr[-1].shape[-1])
@@ -201,6 +201,7 @@ class PLaTune(pl.LightningModule):
         x = cs.to(self.device)
 
         for t in t_values:
+            # print(self.flow(x, time=t)[:, -1])
             t = t.reshape(1, 1, 1).repeat(x.shape[0], 1, 1)
             x = x + self.flow(x, time=t) * dt
         return x
@@ -238,6 +239,8 @@ class PLaTune(pl.LightningModule):
                                                         progress)
         else:
             current_sigma_values = self.sigma_target
+            
+        print(current_sigma_values)
 
         current_sigma = torch.cat([
             torch.full((a.shape[0], 1, a.shape[-1]), current_sigma_values[i])
@@ -250,7 +253,7 @@ class PLaTune(pl.LightningModule):
         # define control distribution
         current_sigma = self.get_sigma(a, warmup)
         if zero_var:
-            c_dist = D.Normal(a, 0.001 * torch.ones_like(current_sigma))
+            c_dist = D.Normal(a, 0.1 * torch.ones_like(current_sigma))
         else:
             c_dist = D.Normal(a, current_sigma)
 
