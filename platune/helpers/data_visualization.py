@@ -10,19 +10,24 @@ def plot_features_extraction(c_gt, c_rec, descriptor_name="", figsize=(10, 5)):
     rec = None
     if c_rec is not None:
         rec = c_rec.detach().cpu().numpy()
-    
+
     # Plot each line with label
     ax.plot(gt, label='Ground Truth', color='C0', linewidth=2)
     if c_rec is not None:
-        ax.plot(rec, label='Ours', color='C1', linestyle='--', linewidth=2, alpha=0.9)
-    
+        ax.plot(rec,
+                label='Ours',
+                color='C1',
+                linestyle='--',
+                linewidth=2,
+                alpha=0.9)
+
     # Set title and labels
     ax.set_title(descriptor_name, fontsize=14, weight='bold')
     ax.set_xlabel('latent frames', fontsize=12)
     ax.set_ylabel('control variable', fontsize=12)
 
     # Set y-axis limits
-    ax.set_ylim(-1.2, 1.2)
+    ax.set_ylim(-3.2, 3.)
 
     # Add legend and grid
     ax.legend(loc='upper right', fontsize=10)

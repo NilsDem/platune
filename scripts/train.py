@@ -1,7 +1,7 @@
 import sys
 
-sys.path.append("/data/nils/repos/platune")
-sys.path.append("/data/nils/repos/platune/platune")
+sys.path.append("/data/nils/repos2/platune")
+sys.path.append("/data/nils/repos2/platune/platune")
 
 import gin
 import os
@@ -11,6 +11,7 @@ import pickle
 import torch
 import pytorch_lightning as pl
 from pathlib import Path
+from after.autoencoder.wrappers import M2LWrapper
 
 from platune.datasets.dataset import load_data
 from platune.model import PLaTune, SDEdit
@@ -42,7 +43,7 @@ def search_for_run(run_path, mode="last"):
               help='Name of the gin configuration file to use')
 @click.option('-s',
               '--save_path',
-              default="",
+              default="./runs",
               help='path to save models checkpoints')
 @click.option('--max_steps',
               default=1_500_000,
@@ -129,7 +130,9 @@ def main(db_path, name, config, save_path, max_steps, val_every, gpu, ckpt,
                     bins_values.append(v)
 
     # EMB MODEL
-    if emb_model_path is not None:
+    if emb_model_path == "music2latent":
+        emb_model = M2LWrapper()
+    elif emb_model_path is not None:
         emb_model = torch.jit.load(emb_model_path, map_location='cpu').eval()
     else:
         emb_model = None
