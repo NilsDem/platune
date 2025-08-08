@@ -9,13 +9,14 @@ from typing import List
 
 from .audio_example import AudioExample
 from .base import SimpleDataset
+from .midi_descriptors import compute_midi_descriptors
 
 CONTINUOUS_ATTRIBUTES = [
     'rms', 'loudness1s', 'integrated_loudness', 'centroid', 'bandwidth',
     'booming', 'sharpness', 'arousal', 'valence', "dark", "epic", "retro",
     "fast", "loudness1s", "energetic", "melodic", "emotional", "dark",
     "average_duration", "note_density", "central_pitch", "pitch_range",
-    "children", "energetic", "emotional", "dark"
+    "children", "energetic", "emotional", "dark", "pitch_range_var"
 ]
 DISCRETE_ATTRIBUTES = [
     'onsets',
@@ -30,6 +31,11 @@ DISCRETE_ATTRIBUTES = [
     'dynamics',
     'Mode',
     "key",
+]
+
+MIDI_DESCRIPTORS = [
+    "note_density", "average_duration", "pitch_range", "central_pitch",
+    "pitch_range_var"
 ]
 AE_RATIO = 4096
 SAMPLE_RATE = 44100
@@ -339,6 +345,7 @@ def make_collate_fn(
 
         for item in batch:
             x = item["z"]
+            x = np.pad(x, ((0, 0), (0, 1)), mode='edge')  # pad to power of 2
             total_time = x.shape[-1]
 
             # Crop waveform
@@ -372,9 +379,23 @@ def make_collate_fn(
                 cropped_velocity = velocity_signal[
                     feature_start:feature_start + feature_len]
 
-            for name in descriptor_names:
+            if any([n in MIDI_DESCRIPTORS for n in descriptor_names]):
+                midi_descriptors = compute_midi_descriptors(
+                    item["midi"],
+                    window_size=1,
+                    hop_size=0.05,
+                    playing_notes=True,
+                    target_length=total_time,
+                    total_time= total_time* hop_length / 44100)
 
-                if name == "pitch":
+                for descr in midi_descriptors:
+                    midi_descriptors[descr] = midi_descriptors[descr][
+                        feature_start:feature_start + feature_len]
+
+            for name in descriptor_names:
+                if name in MIDI_DESCRIPTORS:
+                    cropped = midi_descriptors[name]
+                elif name == "pitch":
                     cropped = cropped_pitch
                     # norm = (cropped_pitch) / 12
                 elif name == "octave":
@@ -385,19 +406,7 @@ def make_collate_fn(
                 else:
                     values = np.array(item[name]).flatten()
                     cropped = values[feature_start:feature_start + feature_len]
-                    # # Normalize
-                    # stats = descriptor_stats[name]
-                    # min_val, max_val = stats["min"], stats["max"]
-                    # norm = (cropped - min_val) / (max_val - min_val)
-                    # norm = np.clip(norm, 0.0, 1.0)
 
-                    # # Bin
-                    # bins = np.array(stats["quantile_bins"])
-                    # bucket = np.stack([
-                    #     int(np.digitize(c, bins, right=False)) - 1
-                    #     for c in cropped
-                    # ])
-                    # bucket = np.clip(bucket, 0, len(bins) - 2)
                 if name in CONTINUOUS_ATTRIBUTES:
                     cropped_continuous.append(cropped)
                 elif name in DISCRETE_ATTRIBUTES:
@@ -414,7 +423,7 @@ def make_collate_fn(
         #     waveforms = transform(waveforms)
         # waveforms = torch.from_numpy(waveforms).reshape(
         #     waveforms.shape[0], 1, -1).float()
-
+        # print([z.shape for z in attr_continous])
         attr_continous = np.stack(attr_continous)
         attr_discrete = np.stack(attr_discrete)
         # binned_features = np.stack(binned_features)
@@ -429,7 +438,8 @@ def make_collate_fn(
                 b["metadata"]["instrument"].replace("_synthetic", "")
                 for b in batch
             ]
-        return zs, attr_discrete, attr_continous, instrument
+            return zs, attr_discrete, attr_continous, instrument
+        return zs, attr_discrete, attr_continous, ["none"] * len(zs)
 
     return collate_fn
 
@@ -453,8 +463,9 @@ def load_data(data_path: List[str],
               descriptor_file: str = None,
               use_instrument: bool = True):
     data_keys = ["z", "midi", "metadata"] + [
-        k for k in discrete_keys if k not in ["pitch", "octave", "velocity"]
-    ] + continuous_keys
+        k for k in discrete_keys
+        if k not in ["pitch", "octave", "velocity"] + MIDI_DESCRIPTORS
+    ] + [c for c in continuous_keys if c not in MIDI_DESCRIPTORS]
 
     if len(data_path) > 1:
         path_dict = {f: {"name": f, "path": f} for f in data_path}
