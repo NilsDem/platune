@@ -196,6 +196,13 @@ def main(db_path, name, config, save_path, max_steps, val_every, gpu, ckpt,
         print("Restarting from step : ", step)
         trainer.fit_loop.epoch_loop._batches_that_stepped = step
 
+    print("Data loading")
+    try:
+        from platune.datasets.midi_descriptors import compute_midi_descriptors
+        compute_midi_descriptors(None)
+    except:
+        print("Error computing midi descriptors, skipping...")
+
     with open(os.path.join(os.path.join(save_path, name), "config.gin"),
               "w") as config_out:
         config_out.write(gin.operative_config_str())

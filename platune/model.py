@@ -249,6 +249,7 @@ class PLaTune(pl.LightningModule):
     def get_cs_distributions(self, a, warmup=False, zero_var=False):
         # define control distribution
         current_sigma = self.get_sigma(a, warmup)
+
         if zero_var:
             c_dist = D.Normal(a, 0.001 * torch.ones_like(current_sigma))
         else:

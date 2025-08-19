@@ -381,12 +381,9 @@ def make_collate_fn(
 
             if any([n in MIDI_DESCRIPTORS for n in descriptor_names]):
                 midi_descriptors = compute_midi_descriptors(
-                    item["midi"],
-                    window_size=1,
-                    hop_size=0.05,
-                    playing_notes=True,
+                    midi=item["midi"],
                     target_length=total_time,
-                    total_time= total_time* hop_length / 44100)
+                    total_time=total_time * hop_length / 44100)
 
                 for descr in midi_descriptors:
                     midi_descriptors[descr] = midi_descriptors[descr][

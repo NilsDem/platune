@@ -1,6 +1,7 @@
 import numpy as np
 import pretty_midi
 
+import gin
 import numpy as np
 from scipy.interpolate import interp1d
 
@@ -12,7 +13,9 @@ from scipy.signal import savgol_filter
 def resample_descriptors(descriptors: dict,
                          target_length: int,
                          smoothing_window: int = 17,
-                         polyorder: int = 3) -> dict:
+                         polyorder: int = 3,
+                         times_original=None,
+                         total_time=None) -> dict:
     """
     Smooth and resample descriptor curves using Savitzky-Golay filtering and linear interpolation.
 
@@ -65,14 +68,21 @@ def resample_descriptors(descriptors: dict,
             smoothed = signal  # fallback if filtering fails
 
         # Interpolation to target length
-        x_old = np.linspace(0, 1, N)
-        x_new = np.linspace(0, 1, target_length)
-        interp_func = interp1d(x_old, smoothed, kind='linear')
+
+        x_old = times_original  #np.linspace(0, 1, N)
+        x_new = np.linspace(0, total_time, target_length)
+
+        interp_func = interp1d(x_old,
+                               smoothed,
+                               kind='linear',
+                               bounds_error=False,
+                               fill_value=(smoothed[0], smoothed[-1]))
         resampled[name] = interp_func(x_new)
 
     return resampled
 
 
+@gin.configurable
 def compute_midi_descriptors(midi: pretty_midi.PrettyMIDI,
                              window_size: float,
                              hop_size: float,
@@ -112,10 +122,10 @@ def compute_midi_descriptors(midi: pretty_midi.PrettyMIDI,
 
     # Initialize outputs
     note_density = np.zeros(num_frames)
-    central_pitch = np.full(num_frames, np.nan)
-    average_duration = np.full(num_frames, np.nan)
-    pitch_range_abs = np.full(num_frames, np.nan)
-    pitch_range_var = np.full(num_frames, np.nan)
+    central_pitch = np.full(num_frames, 0.)
+    average_duration = np.full(num_frames, 0.)
+    pitch_range_abs = np.full(num_frames, 0.)
+    pitch_range_var = np.full(num_frames, 0.)
 
     for i, center in enumerate(times):
         t_start = center - window_size / 2
@@ -148,6 +158,9 @@ def compute_midi_descriptors(midi: pretty_midi.PrettyMIDI,
     }
 
     if target_length is not None:
-        out = resample_descriptors(out, target_length)
+        out = resample_descriptors(out,
+                                   target_length,
+                                   total_time=total_time,
+                                   times_original=times)
 
     return out
